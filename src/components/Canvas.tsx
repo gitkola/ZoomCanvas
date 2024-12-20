@@ -1,20 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAtom } from 'jotai'
 import { Grid } from './Grid'
 import { Toolbar } from './Toolbar'
+import { ThemeSwitcher } from './ThemeSwitcher'
+import { Block } from './Block'
+import { blocksAtom, isZoomLockedAtom } from '../store/atoms'
+import { nanoid } from 'nanoid'
 
 export const Canvas = () => {
   const [scale, setScale] = useState(1)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [blocks, setBlocks] = useAtom(blocksAtom)
+  const [isZoomLocked] = useAtom(isZoomLockedAtom)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true)
-    setDragStart({
-      x: e.clientX - position.x,
-      y: e.clientY - position.y
-    })
+    if (e.target === containerRef.current || e.target === containerRef.current?.firstChild) {
+      setIsDragging(true)
+      setDragStart({
+        x: e.clientX - position.x,
+        y: e.clientY - position.y
+      })
+    }
   }
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -40,18 +49,66 @@ export const Canvas = () => {
   }, [handleMouseMove, handleMouseUp])
 
   const handleWheel = (e: React.WheelEvent) => {
+    if (isZoomLocked) return
+    
+    // Check if Command (Meta) key is pressed
+    if (!e.metaKey) return
+    
     e.preventDefault()
     const delta = e.deltaY
     setScale(prev => Math.min(Math.max(0.1, prev - delta * 0.001), 5))
   }
 
   const handleZoom = (newScale: number) => {
-    setScale(newScale)
+    if (!isZoomLocked) {
+      setScale(newScale)
+    }
+  }
+
+  const handleAddBlock = () => {
+    const containerRect = containerRef.current?.getBoundingClientRect()
+    if (!containerRect) return
+
+    const centerX = (-position.x + containerRect.width / 2) / scale
+    const centerY = (-position.y + containerRect.height / 2) / scale
+
+    const newBlock = {
+      id: nanoid(),
+      type: 'text' as const,
+      content: 'New block',
+      position: { x: centerX - 150, y: centerY - 100 },
+      size: { width: 300, height: 200 }
+    }
+
+    setBlocks(prev => [...prev, newBlock])
+  }
+
+  const handleBlockUpdate = (id: string, newPosition: { x: number; y: number }, newSize: { width: number; height: number }) => {
+    setBlocks(prev => prev.map(block => 
+      block.id === id ? { ...block, position: newPosition, size: newSize } : block
+    ))
+  }
+
+  const handleBlockDuplicate = (id: string) => {
+    const blockToDuplicate = blocks.find(block => block.id === id)
+    if (!blockToDuplicate) return
+
+    const newBlock = {
+      ...blockToDuplicate,
+      id: nanoid(),
+      position: {
+        x: blockToDuplicate.position.x + 20,
+        y: blockToDuplicate.position.y + 20
+      }
+    }
+
+    setBlocks(prev => [...prev, newBlock])
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-slate-100">
-      <Toolbar scale={scale} onZoom={handleZoom} />
+    <div className="h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-900">
+      <Toolbar scale={scale} onZoom={handleZoom} onAddBlock={handleAddBlock} />
+      <ThemeSwitcher />
       <div
         ref={containerRef}
         className="h-full w-full cursor-grab active:cursor-grabbing"
@@ -66,6 +123,18 @@ export const Canvas = () => {
           className="relative transition-transform duration-75"
         >
           <Grid />
+          {blocks.map(block => (
+            <Block
+              key={block.id}
+              id={block.id}
+              content={block.content}
+              position={block.position}
+              size={block.size}
+              scale={scale}
+              onUpdate={handleBlockUpdate}
+              onDuplicate={handleBlockDuplicate}
+            />
+          ))}
         </div>
       </div>
     </div>

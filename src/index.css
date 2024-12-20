@@ -5,3 +5,22 @@
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
+
+.block-container {
+  touch-action: none;
+}
+
+/* Hide resize handles when not hovering */
+.block-container .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.block-container:hover .react-resizable-handle {
+  opacity: 1;
+}
+
+/* Dark mode support */
+.dark {
+  color-scheme: dark;
+}

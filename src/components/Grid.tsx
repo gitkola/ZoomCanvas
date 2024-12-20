@@ -5,10 +5,12 @@ export const Grid = () => {
 
   return (
     <div
-      className="absolute"
+      className="absolute grid-background"
       style={{
         width: `${gridSize}px`,
         height: `${gridSize}px`,
+        top: `-${gridSize / 2}px`,
+        left: `-${gridSize / 2}px`,
         backgroundImage: `
           linear-gradient(to right, #ddd 1px, transparent 1px),
           linear-gradient(to bottom, #ddd 1px, transparent 1px)

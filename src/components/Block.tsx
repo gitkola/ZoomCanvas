@@ -65,7 +65,8 @@ export const Block = ({ id, content, position, size, scale, onUpdate, onDuplicat
       onDrag={handleDrag}
       onResize={handleResize}
       bounds="parent"
-      className="block-container"
+      className="block-container absolute"
+      style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
     >
       <div
         ref={blockRef}

@@ -17,12 +17,14 @@ export const Canvas = () => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.target === containerRef.current || e.target === containerRef.current?.firstChild) {
+    // Only initiate drag if clicking on the container or grid
+    if (e.target === containerRef.current || (e.target as HTMLElement).classList.contains('grid-background')) {
       setIsDragging(true)
       setDragStart({
         x: e.clientX - position.x,
         y: e.clientY - position.y
       })
+      e.preventDefault()
     }
   }
 
@@ -49,14 +51,23 @@ export const Canvas = () => {
   }, [handleMouseMove, handleMouseUp])
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (isZoomLocked) return
-    
-    // Check if Command (Meta) key is pressed
-    if (!e.metaKey) return
-    
     e.preventDefault()
-    const delta = e.deltaY
-    setScale(prev => Math.min(Math.max(0.1, prev - delta * 0.001), 5))
+
+    if (e.metaKey && !isZoomLocked) {
+      // Zoom behavior when Command/Meta is pressed
+      const delta = e.deltaY
+      setScale(prev => Math.min(Math.max(0.1, prev - delta * 0.001), 5))
+    } else {
+      // Regular scrolling behavior
+      const scrollSpeed = 1
+      const deltaX = e.shiftKey ? e.deltaY : e.deltaX
+      const deltaY = e.shiftKey ? 0 : e.deltaY
+
+      setPosition(prev => ({
+        x: prev.x - deltaX * scrollSpeed,
+        y: prev.y - deltaY * scrollSpeed
+      }))
+    }
   }
 
   const handleZoom = (newScale: number) => {
@@ -69,6 +80,7 @@ export const Canvas = () => {
     const containerRect = containerRef.current?.getBoundingClientRect()
     if (!containerRect) return
 
+    // Calculate center position in canvas coordinates
     const centerX = (-position.x + containerRect.width / 2) / scale
     const centerY = (-position.y + containerRect.height / 2) / scale
 
@@ -119,8 +131,9 @@ export const Canvas = () => {
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
             transformOrigin: '0 0',
+            willChange: 'transform',
           }}
-          className="relative transition-transform duration-75"
+          className="absolute inset-0 transition-transform duration-75"
         >
           <Grid />
           {blocks.map(block => (

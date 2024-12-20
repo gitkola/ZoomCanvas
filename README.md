@@ -474,3 +474,360 @@ export default {
   plugins: [],
 }
 ```
+
+***
+
+## Prompt 03
+
+### Please fix next:
+
+1. `ThemeSwitcher` doesn't react on clicks - no active button changed, no theme mode switching. Expected on click `ThemeSwitcher` not active button the theme mode switch accordingly with persistence in `localStorage` and the clicked button became active
+2. The `React.WheelEvent` works properly while pressing and holding "Command" key but doesn't work at all in other cases. By default on `React.WheelEvent` it needs to scroll canvas vertically, while pressing and holding "Shift" key it needs to scroll canvas horizontally
+3. Dragging and Panning canvas doesn't work at all but it is expected to move canvas accordingly on Dragging and Panning
+4. `Block` needs to be moved on canvas accordingly its Dragging and Panning but its locked at the top of viewport and moves only horizontally
+
+***
+
+### The plan addresses several issues:
+
+1. Fix theme switching by properly initializing and persisting theme state
+2. Implement proper canvas scrolling behavior with both default and Shift key modes
+3. Fix canvas dragging/panning by correcting mouse event handling
+4. Fix Block positioning issues by adjusting the transform and position calculations
+
+#### src/components/ThemeSwitcher.tsx `+22 -4`
+
+```tsx
+import { Monitor, Moon, Sun } from 'lucide-react'
+import { useAtom } from 'jotai'
+import { themeAtom, type Theme } from '../store/atoms'
+import { useEffect } from 'react'
+
+export const ThemeSwitcher = () => {
+  const [theme, setTheme] = useAtom(themeAtom)
+
+  // Handle system theme changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    
+    const handleChange = () => {
+      if (theme === 'system') {
+        document.documentElement.classList.toggle('dark', mediaQuery.matches)
+      }
+    }
+
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [theme])
+
+  // Apply theme changes
+  useEffect(() => {
+    const isDark = 
+      theme === 'dark' || 
+      (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [theme])
+
+  const options: { value: Theme; icon: JSX.Element }[] = [
+    { value: 'light', icon: <Sun size={20} /> },
+    { value: 'dark', icon: <Moon size={20} /> },
+    { value: 'system', icon: <Monitor size={20} /> },
+  ]
+
+  return (
+    <div className="absolute top-4 right-4 bg-white dark:bg-slate-800 rounded-lg shadow-lg flex p-1 gap-1 z-50">
+      {options.map(({ value, icon }) => (
+        <button
+          key={value}
+          onClick={() => setTheme(value)}
+          className={`p-2 rounded-lg transition-colors ${
+            theme === value 
+              ? 'bg-slate-100 dark:bg-slate-700 text-blue-600 dark:text-blue-400' 
+              : 'hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
+          }`}
+          aria-label={`Switch to ${value} theme`}
+        >
+          {icon}
+        </button>
+      ))}
+    </div>
+  )
+}
+```
+
+#### src/components/Canvas.tsx `+22 -9`
+
+```tsx
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAtom } from 'jotai'
+import { Grid } from './Grid'
+import { Toolbar } from './Toolbar'
+import { ThemeSwitcher } from './ThemeSwitcher'
+import { Block } from './Block'
+import { blocksAtom, isZoomLockedAtom } from '../store/atoms'
+import { nanoid } from 'nanoid'
+
+export const Canvas = () => {
+  const [scale, setScale] = useState(1)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [blocks, setBlocks] = useAtom(blocksAtom)
+  const [isZoomLocked] = useAtom(isZoomLockedAtom)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only initiate drag if clicking on the container or grid
+    if (e.target === containerRef.current || (e.target as HTMLElement).classList.contains('grid-background')) {
+      setIsDragging(true)
+      setDragStart({
+        x: e.clientX - position.x,
+        y: e.clientY - position.y
+      })
+      e.preventDefault()
+    }
+  }
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+      setPosition({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      })
+    }
+  }, [isDragging, dragStart])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [handleMouseMove, handleMouseUp])
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault()
+
+    if (e.metaKey && !isZoomLocked) {
+      // Zoom behavior when Command/Meta is pressed
+      const delta = e.deltaY
+      setScale(prev => Math.min(Math.max(0.1, prev - delta * 0.001), 5))
+    } else {
+      // Regular scrolling behavior
+      const scrollSpeed = 1
+      const deltaX = e.shiftKey ? e.deltaY : e.deltaX
+      const deltaY = e.shiftKey ? 0 : e.deltaY
+
+      setPosition(prev => ({
+        x: prev.x - deltaX * scrollSpeed,
+        y: prev.y - deltaY * scrollSpeed
+      }))
+    }
+  }
+
+  const handleZoom = (newScale: number) => {
+    if (!isZoomLocked) {
+      setScale(newScale)
+    }
+  }
+
+  const handleAddBlock = () => {
+    const containerRect = containerRef.current?.getBoundingClientRect()
+    if (!containerRect) return
+
+    // Calculate center position in canvas coordinates
+    const centerX = (-position.x + containerRect.width / 2) / scale
+    const centerY = (-position.y + containerRect.height / 2) / scale
+
+    const newBlock = {
+      id: nanoid(),
+      type: 'text' as const,
+      content: 'New block',
+      position: { x: centerX - 150, y: centerY - 100 },
+      size: { width: 300, height: 200 }
+    }
+
+    setBlocks(prev => [...prev, newBlock])
+  }
+
+  const handleBlockUpdate = (id: string, newPosition: { x: number; y: number }, newSize: { width: number; height: number }) => {
+    setBlocks(prev => prev.map(block => 
+      block.id === id ? { ...block, position: newPosition, size: newSize } : block
+    ))
+  }
+
+  const handleBlockDuplicate = (id: string) => {
+    const blockToDuplicate = blocks.find(block => block.id === id)
+    if (!blockToDuplicate) return
+
+    const newBlock = {
+      ...blockToDuplicate,
+      id: nanoid(),
+      position: {
+        x: blockToDuplicate.position.x + 20,
+        y: blockToDuplicate.position.y + 20
+      }
+    }
+
+    setBlocks(prev => [...prev, newBlock])
+  }
+
+  return (
+    <div className="h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-900">
+      <Toolbar scale={scale} onZoom={handleZoom} onAddBlock={handleAddBlock} />
+      <ThemeSwitcher />
+      <div
+        ref={containerRef}
+        className="h-full w-full cursor-grab active:cursor-grabbing"
+        onMouseDown={handleMouseDown}
+        onWheel={handleWheel}
+      >
+        <div
+          style={{
+            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
+            transformOrigin: '0 0',
+            willChange: 'transform',
+          }}
+          className="absolute inset-0 transition-transform duration-75"
+        >
+          <Grid />
+          {blocks.map(block => (
+            <Block
+              key={block.id}
+              id={block.id}
+              content={block.content}
+              position={block.position}
+              size={block.size}
+              scale={scale}
+              onUpdate={handleBlockUpdate}
+              onDuplicate={handleBlockDuplicate}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+#### src/components/Block.tsx `+2 -1`
+
+```tsx
+import { useRef, useState } from 'react'
+import { Rnd } from 'react-rnd'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+
+interface BlockProps {
+  id: string
+  content: string
+  position: { x: number; y: number }
+  size: { width: number; height: number }
+  scale: number
+  onUpdate: (id: string, position: { x: number; y: number }, size: { width: number; height: number }) => void
+  onDuplicate?: (id: string) => void
+}
+
+export const Block = ({ id, content, position, size, scale, onUpdate, onDuplicate }: BlockProps) => {
+  const [isDragging, setIsDragging] = useState(false)
+  const blockRef = useRef<HTMLDivElement>(null)
+
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content,
+    editorProps: {
+      attributes: {
+        class: 'prose dark:prose-invert max-w-none p-4 focus:outline-none'
+      }
+    }
+  })
+
+  const handleDrag = (_e: any, data: { x: number; y: number }) => {
+    const { altKey, shiftKey } = window.event as MouseEvent
+    
+    if (altKey && !isDragging && onDuplicate) {
+      onDuplicate(id)
+      return
+    }
+
+    let newX = data.x
+    let newY = data.y
+
+    if (shiftKey) {
+      const gridSize = 10
+      newX = Math.round(newX / gridSize) * gridSize
+      newY = Math.round(newY / gridSize) * gridSize
+    }
+
+    onUpdate(id, { x: newX, y: newY }, size)
+  }
+
+  const handleResize = (_e: any, _direction: any, ref: any, _delta: any, position: { x: number; y: number }) => {
+    onUpdate(
+      id,
+      position,
+      { width: parseInt(ref.style.width), height: parseInt(ref.style.height) }
+    )
+  }
+
+  return (
+    <Rnd
+      position={position}
+      size={size}
+      scale={scale}
+      onDragStart={() => setIsDragging(true)}
+      onDragStop={() => setIsDragging(false)}
+      onDrag={handleDrag}
+      onResize={handleResize}
+      bounds="parent"
+      className="block-container absolute"
+      style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+    >
+      <div
+        ref={blockRef}
+        className={`w-full h-full bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 ${
+          isDragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
+      >
+        <EditorContent editor={editor} />
+      </div>
+    </Rnd>
+  )
+}
+```
+
+#### src/components/Grid.tsx `+3 -1`
+
+```tsx
+export const Grid = () => {
+  // Create a large enough area for the grid (50x50 cells)
+  const gridSize = 5000
+  const cellSize = 100
+
+  return (
+    <div
+      className="absolute grid-background"
+      style={{
+        width: `${gridSize}px`,
+        height: `${gridSize}px`,
+        top: `-${gridSize / 2}px`,
+        left: `-${gridSize / 2}px`,
+        backgroundImage: `
+          linear-gradient(to right, #ddd 1px, transparent 1px),
+          linear-gradient(to bottom, #ddd 1px, transparent 1px)
+        `,
+        backgroundSize: `${cellSize}px ${cellSize}px`,
+      }}
+    />
+  )
+}
+```
+
+***
+
